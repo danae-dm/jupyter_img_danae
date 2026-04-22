@@ -1,0 +1,16 @@
+name: jupyter
+prefix: /srv/jupyter
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - jupyterlab>=4.5
+  - jupyterhub-singleuser=4.*
+  - dask-labextension
+  - jupyterlab-git
+  - jupyterlab-h5web
+  - uv
+  - pip
+  - pip:
+      - batchspawner==1.1.0
+  # add your own plugins here
