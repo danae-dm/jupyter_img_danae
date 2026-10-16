@@ -44,10 +44,9 @@ From: ubuntu:24.04
     export UV_CACHE_DIR=/tmp/uv-build-cache
     export UV_PYTHON_PREFERENCE=system
 
-    /usr/local/bin/uv sync \
-        --frozen \
-        --no-dev \
-        --python /usr/bin/python3.12
+/usr/local/bin/uv sync \
+    --no-dev \
+    --python /usr/bin/python3.12
 
     /opt/jupyter/.venv/bin/python - <<'PY'
 import batchspawner
