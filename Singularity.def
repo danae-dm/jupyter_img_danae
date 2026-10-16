@@ -1,0 +1,131 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+%labels
+    Author danae-dm
+    Description "Ubuntu 24.04 JupyterLab image using uv"
+    JupyterHub 5.2.1
+    JupyterLab 4.3.4
+    PackageManager uv
+
+%files
+    newenv                 /usr/local/bin/newenv
+    server/pyproject.toml  /opt/jupyter/pyproject.toml
+    server/uv.lock         /opt/jupyter/uv.lock
+
+%post
+    set -eux
+
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        git \
+        build-essential \
+        pkg-config \
+        python3.12 \
+        python3.12-dev \
+        python3.12-venv
+
+    rm -rf /var/lib/apt/lists/*
+
+    # Initial functional build. Pin and checksum uv for a later production release.
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    install -m 0755 /root/.local/bin/uv /usr/local/bin/uv
+
+    chmod 0755 /usr/local/bin/newenv
+
+    mkdir -p /opt/jupyter
+    cd /opt/jupyter
+
+    export UV_LINK_MODE=copy
+    export UV_CACHE_DIR=/tmp/uv-build-cache
+    export UV_PYTHON_PREFERENCE=system
+
+    /usr/local/bin/uv sync \
+        --frozen \
+        --no-dev \
+        --python /usr/bin/python3.12
+
+    /opt/jupyter/.venv/bin/python - <<'PY'
+import batchspawner
+import h5py
+import ipykernel
+import jupyterhub
+import jupyterlab
+import jupyterlab_h5web
+
+print("batchspawner:", batchspawner.__version__)
+print("jupyterhub:", jupyterhub.__version__)
+print("jupyterlab:", jupyterlab.__version__)
+print("Server environment validation succeeded")
+PY
+
+    chown -R root:root /opt/jupyter
+    chmod -R go-w /opt/jupyter
+
+%environment
+    export PATH="/opt/jupyter/.venv/bin:/usr/local/bin:${PATH}"
+
+    export UV_PYTHON_INSTALL_DIR="${HOME}/.local/share/uv/python"
+    export UV_PYTHON_PREFERENCE="only-managed"
+    export UV_LINK_MODE="copy"
+
+    # SLURM_TMPDIR is unset on this cluster, so use /tmp by default.
+    export UV_CACHE_DIR="/tmp/uv-cache-${USER:-unknown}-${SLURM_JOB_ID:-manual}"
+
+    unset PYTHONHOME
+    unset PYTHONPATH
+    export PYTHONNOUSERSITE=1
+
+%runscript
+    # The CLIP portal runs:
+    #
+    #   singularity run IMAGE batchspawner-singleuser jupyterhub-singleuser ...
+    #
+    # Forward those arguments unchanged.
+    if [ "$#" -eq 0 ]; then
+        exec jupyterhub-singleuser
+    fi
+
+    exec "$@"
+
+%test
+    set -eu
+
+    uv --version
+
+    command -v batchspawner-singleuser
+    command -v jupyterhub-singleuser
+
+    python - <<'PY'
+import batchspawner
+import h5py
+import ipykernel
+import jupyterhub
+import jupyterlab
+import jupyterlab_h5web
+
+print("All image tests passed")
+PY
+
+    jupyterhub-singleuser --help >/dev/null
+
+%help
+    Custom CLIP JupyterLab image.
+
+    The image provides:
+      - JupyterHub 5.2.1
+      - JupyterLab 4.3.4
+      - jupyterlab-h5web 12.3.0
+      - batchspawner 1.3.0
+      - uv
+
+    User environments belong outside the image:
+      ~/envs/<name>/
+
+    Create one with:
+      newenv NAME
