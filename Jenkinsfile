@@ -1,10 +1,9 @@
 buildSingularityImage([
-    recipeFile: 'Singularity.def',
     imageName: 'jupyter-danae',
-
+    recipeFile: 'Singularity.def',
+    signKeyCredentials: null,
     pushRegistry: 'singularity.vbc.ac.at',
-    pushRegistryNamespace: 'clip',
-
+    pushRegistryNamespace: 'demo',
+    pushRegistryCredentials: 'svc-singularity-token',
     pushBranches: ['main'],
-    runTest: true
 ])
