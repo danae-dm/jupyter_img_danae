@@ -9,7 +9,6 @@ From: ubuntu:24.04
     PackageManager uv
 
 %files
-    newenv                 /usr/local/bin/newenv
     server/pyproject.toml  /opt/jupyter/pyproject.toml
 
 %post
@@ -31,11 +30,9 @@ From: ubuntu:24.04
 
     rm -rf /var/lib/apt/lists/*
 
-    # Initial functional build. Pin and checksum uv for a later production release.
+    # Install uv
     curl -LsSf https://astral.sh/uv/install.sh | sh
     install -m 0755 /root/.local/bin/uv /usr/local/bin/uv
-
-    chmod 0755 /usr/local/bin/newenv
 
     mkdir -p /opt/jupyter
     cd /opt/jupyter
@@ -44,12 +41,15 @@ From: ubuntu:24.04
     export UV_CACHE_DIR=/tmp/uv-build-cache
     export UV_PYTHON_PREFERENCE=system
 
-/usr/local/bin/uv sync \
-    --no-dev \
-    --python /usr/bin/python3.12
+    /usr/local/bin/uv sync \
+        --no-dev \
+        --python /usr/bin/python3.12
 
     /opt/jupyter/.venv/bin/python - <<'PY'
 import batchspawner
+import dask
+import distributed
+import dask_labextension
 import h5py
 import ipykernel
 import jupyterhub
@@ -63,7 +63,7 @@ print("Server environment validation succeeded")
 PY
 
     chown -R root:root /opt/jupyter
-    chmod -R go-w /opt/jupyter
+    chmod -R 555 /opt/jupyter
 
 %environment
     export PATH="/opt/jupyter/.venv/bin:/usr/local/bin:${PATH}"
@@ -80,11 +80,6 @@ PY
     export PYTHONNOUSERSITE=1
 
 %runscript
-    # The CLIP portal runs:
-    #
-    #   singularity run IMAGE batchspawner-singleuser jupyterhub-singleuser ...
-    #
-    # Forward those arguments unchanged.
     if [ "$#" -eq 0 ]; then
         exec jupyterhub-singleuser
     fi
@@ -101,6 +96,9 @@ PY
 
     python - <<'PY'
 import batchspawner
+import dask
+import distributed
+import dask_labextension
 import h5py
 import ipykernel
 import jupyterhub
@@ -119,11 +117,6 @@ PY
       - JupyterHub 5.2.1
       - JupyterLab 4.3.4
       - jupyterlab-h5web 12.3.0
+      - dask & dask-labextension
       - batchspawner 1.3.0
       - uv
-
-    User environments belong outside the image:
-      ~/envs/<name>/
-
-    Create one with:
-      newenv NAME
