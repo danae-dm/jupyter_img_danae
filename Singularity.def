@@ -9,7 +9,7 @@ From: ubuntu:24.04
     PackageManager uv
 
 %files
-    server/pyproject.toml  /opt/jupyter/pyproject.toml
+    server/pyproject.toml /opt/jupyter/pyproject.toml
 
 %post
     set -eux
@@ -17,6 +17,7 @@ From: ubuntu:24.04
     export DEBIAN_FRONTEND=noninteractive
 
     apt-get update
+
     apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
@@ -30,21 +31,23 @@ From: ubuntu:24.04
 
     rm -rf /var/lib/apt/lists/*
 
-    # Install uv
+    # Install uv.
     curl -LsSf https://astral.sh/uv/install.sh | sh
     install -m 0755 /root/.local/bin/uv /usr/local/bin/uv
 
     mkdir -p /opt/jupyter
     cd /opt/jupyter
 
+    # Build the JupyterHub server environment with the container's Python.
     export UV_LINK_MODE=copy
     export UV_CACHE_DIR=/tmp/uv-build-cache
-    export UV_PYTHON_PREFERENCE=system
+    export UV_PYTHON_PREFERENCE=only-system
 
     /usr/local/bin/uv sync \
         --no-dev \
         --python /usr/bin/python3.12
 
+    # Validate the server environment.
     /opt/jupyter/.venv/bin/python - <<'PY'
 import batchspawner
 import dask
@@ -66,20 +69,182 @@ PY
     chmod -R 555 /opt/jupyter
 
 %environment
-    export PATH="/opt/jupyter/.venv/bin:/usr/local/bin:${PATH}"
+    # Use only executables supplied by the container.
+    #
+    # In particular, do not retain:
+    #   /software/...
+    #   /opt/ohpc/...
+    #   ~/.local/bin
+    #   ~/bin
+    export PATH="/opt/jupyter/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-    export UV_PYTHON_INSTALL_DIR="${HOME}/.local/share/uv/python"
-    export UV_PYTHON_PREFERENCE="only-managed"
-    export UV_LINK_MODE="copy"
-
-    # SLURM_TMPDIR is unset on this cluster, so use /tmp by default.
-    export UV_CACHE_DIR="/tmp/uv-cache-${USER:-unknown}-${SLURM_JOB_ID:-manual}"
-
+    # Do not inherit an environment or Python configuration from the host.
+    unset VIRTUAL_ENV
     unset PYTHONHOME
     unset PYTHONPATH
+    unset PYTHONSTARTUP
+
+    # Do not inherit Conda state from the host.
+    unset CONDA_PREFIX
+    unset CONDA_DEFAULT_ENV
+    unset CONDA_PROMPT_MODIFIER
+
+    # Do not inherit package-manager configuration from the host.
+    unset UV_CONFIG_FILE
+    unset PIP_CONFIG_FILE
+
+    # Do not inherit Jupyter search paths or configuration from the host.
+    unset JUPYTER_PATH
+    unset JUPYTER_CONFIG_PATH
+
+    # Prevent non-interactive Bash shells from sourcing the host Lmod setup.
+    unset BASH_ENV
+
+    # Remove host module and EasyBuild state.
+    unset MODULEPATH
+    unset MODULESHOME
+    unset LOADEDMODULES
+    unset LMOD_CMD
+    unset LMOD_DIR
+    unset LMOD_PKG
+    unset LMOD_ROOT
+    unset LMOD_RC
+    unset LMOD_VERSION
+    unset _LMFILES_
+    unset _ModuleTable001_
+    unset _ModuleTable002_
+    unset _ModuleTable003_
+    unset _ModuleTable004_
+    unset _ModuleTable_Sz_
+    unset __Init_Default_Modules
+    unset __LMOD_DEFAULT_MODULES_LOADED__
+    unset EASYBUILD_ADD_DUMMY_TO_MINIMAL_TOOLCHAINS
+    unset EASYBUILD_BUILDPATH
+    unset EASYBUILD_DISABLE_FIXED_INSTALLDIR_NAMING_SCHEME
+    unset EASYBUILD_GIT_WORKING_DIRS_PATH
+    unset EASYBUILD_GROUP_WRITABLE_INSTALLDIR
+    unset EASYBUILD_HIDE_DEPS
+    unset EASYBUILD_HIDE_TOOLCHAINS
+    unset EASYBUILD_INCLUDE_MODULE_NAMING_SCHEMES
+    unset EASYBUILD_JOB_BACKEND
+    unset EASYBUILD_MINIMAL_TOOLCHAINS
+    unset EASYBUILD_MODULES_TOOL
+    unset EASYBUILD_MODULE_NAMING_SCHEME
+    unset EASYBUILD_MODULE_SYNTAX
+    unset EASYBUILD_PREFIX
+    unset EASYBUILD_RECURSIVE_MODULE_UNLOAD
+    unset EASYBUILD_ROBOT_PATHS
+    unset EASYBUILD_SOURCEPATH
+
+    # Remove host MPI launcher configuration.
+    #
+    # These can be reintroduced later if a specific MPI workflow requires
+    # them, but they should not affect ordinary Python/Jupyter environments.
+    unset OMPI_MCA_btl
+    unset OMPI_MCA_btl_tcp_if_include
+    unset OMPI_MCA_oob_tcp_if_include
+    unset OMPI_MCA_plm_slurm_args
+    unset I_MPI_HYDRA_BOOTSTRAP
+    unset I_MPI_HYDRA_BOOTSTRAP_EXEC_EXTRA_ARGS
+    unset I_MPI_PMI_LIBRARY
+    unset HYDRA_BOOTSTRAP
+    unset HYDRA_LAUNCHER_EXTRA_ARGS
+    unset PMI_FD
+    unset PMI_JOBID
+    unset PMI_RANK
+    unset PMI_SIZE
+    unset PRTE_MCA_plm_slurm_args
+
+    # Remove host-specific VS Code glibc tooling.
+    unset VSCODE_SERVER_CUSTOM_GLIBC_LINKER
+    unset VSCODE_SERVER_CUSTOM_GLIBC_PATH
+    unset VSCODE_SERVER_PATCHELF_PATH
+
+    # Prevent user site-packages on the mounted home directory from being
+    # added to Python's import path.
     export PYTHONNOUSERSITE=1
 
+    # Use the Python supplied by the container.
+    #
+    # "only-system" means that uv should use Python installed in the
+    # container, such as /usr/bin/python3.12. It should not install or
+    # select a uv-managed Python from the user's home directory.
+    export UV_PYTHON_PREFERENCE="only-system"
+
+    # Copy files into virtual environments instead of using links.
+    export UV_LINK_MODE="copy"
+
+    # This cache is not persistent and does not contain the user's
+    # virtual environment. It is only uv's download/build cache.
+    #
+    # The final launcher may override this with a more specific path.
+    export UV_CACHE_DIR="/tmp/uv-cache-${USER:-unknown}"
+
 %runscript
+    # Repeat the important cleanup here because the runscript is the
+    # entrypoint used when the image is started with "apptainer run".
+    unset VIRTUAL_ENV
+    unset PYTHONHOME
+    unset PYTHONPATH
+    unset PYTHONSTARTUP
+
+    unset CONDA_PREFIX
+    unset CONDA_DEFAULT_ENV
+    unset CONDA_PROMPT_MODIFIER
+
+    unset UV_CONFIG_FILE
+    unset PIP_CONFIG_FILE
+
+    unset JUPYTER_PATH
+    unset JUPYTER_CONFIG_PATH
+    unset BASH_ENV
+
+    unset MODULEPATH
+    unset MODULESHOME
+    unset LOADEDMODULES
+    unset LMOD_CMD
+    unset LMOD_DIR
+    unset LMOD_PKG
+    unset LMOD_ROOT
+    unset LMOD_RC
+    unset LMOD_VERSION
+    unset _LMFILES_
+    unset _ModuleTable001_
+    unset _ModuleTable002_
+    unset _ModuleTable003_
+    unset _ModuleTable004_
+    unset _ModuleTable_Sz_
+    unset __Init_Default_Modules
+    unset __LMOD_DEFAULT_MODULES_LOADED__
+
+    unset OMPI_MCA_btl
+    unset OMPI_MCA_btl_tcp_if_include
+    unset OMPI_MCA_oob_tcp_if_include
+    unset OMPI_MCA_plm_slurm_args
+    unset I_MPI_HYDRA_BOOTSTRAP
+    unset I_MPI_HYDRA_BOOTSTRAP_EXEC_EXTRA_ARGS
+    unset I_MPI_PMI_LIBRARY
+    unset HYDRA_BOOTSTRAP
+    unset HYDRA_LAUNCHER_EXTRA_ARGS
+    unset PMI_FD
+    unset PMI_JOBID
+    unset PMI_RANK
+    unset PMI_SIZE
+    unset PRTE_MCA_plm_slurm_args
+
+    unset VSCODE_SERVER_CUSTOM_GLIBC_LINKER
+    unset VSCODE_SERVER_CUSTOM_GLIBC_PATH
+    unset VSCODE_SERVER_PATCHELF_PATH
+
+    export PATH="/opt/jupyter/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
+    export PYTHONNOUSERSITE=1
+    export UV_PYTHON_PREFERENCE="only-system"
+    export UV_LINK_MODE="copy"
+
+    if [ -z "${UV_CACHE_DIR:-}" ]; then
+        export UV_CACHE_DIR="/tmp/uv-cache-${USER:-unknown}"
+    fi
+
     if [ "$#" -eq 0 ]; then
         exec jupyterhub-singleuser
     fi
@@ -117,6 +282,11 @@ PY
       - JupyterHub 5.2.1
       - JupyterLab 4.3.4
       - jupyterlab-h5web 12.3.0
-      - dask & dask-labextension
+      - dask and dask-labextension
       - batchspawner 1.3.0
       - uv
+
+    Users should create their own virtual environments using the Python
+    supplied by the container:
+
+      uv venv --python /usr/bin/python3.12 ~/venvs/my-environment
